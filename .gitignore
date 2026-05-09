@@ -1,0 +1,20 @@
+# Build / test outputs.
+test-logs/
+nim-cache/
+bench-results/
+
+# direnv local state.
+.direnv/
+
+# Compiled test binaries.
+tests/test_*
+!tests/test_*.nim
+!tests/test_*.cfg
+tests/echo_packet_app
+!tests/echo_packet_app.nim
+
+# Nim caches.
+*.dSYM
+*.exe
+*.pdb
+nimcache/

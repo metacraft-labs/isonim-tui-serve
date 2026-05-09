@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>isonim-tui-serve</title>
+  <link
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css"
+  />
+  <style>
+    body {
+      background: #1d1f21;
+      color: #c5c8c6;
+      font-family: monospace;
+      margin: 0;
+      padding: 1rem;
+    }
+    h1 {
+      font-size: 1rem;
+      margin: 0 0 0.5rem 0;
+    }
+    #terminal {
+      width: 100%;
+      height: calc(100vh - 4rem);
+      border: 1px solid #444;
+    }
+    #status {
+      font-size: 0.8rem;
+      color: #5fafff;
+      margin-bottom: 0.5rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>isonim-tui-serve <small id="status">connecting...</small></h1>
+  <div id="terminal"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+  <script>
+    /*
+     * Reference HTML/JS bridge — pairs with isonim-tui's M26 WebDriver
+     * and the Nim `isonim-tui-serve` server.
+     *
+     * Wire summary (matches src/isonim_tui_serve/packet.nim and
+     * src/isonim_tui/drivers/web_driver.nim):
+     *
+     *   * Each WebSocket *binary* message is one framed packet.
+     *   * Packet shape: 1-byte type ('D'/'M'/'P') + 4-byte
+     *     big-endian length + payload bytes.
+     *   * 'D' packets carry stdout from the hosted app — feed the
+     *     payload bytes into xterm.js via term.write.
+     *   * 'M' packets carry meta events to/from the server.
+     *   * 'P' packets carry input events from the browser to the
+     *     server (key, mouse, resize).
+     */
+    const term = new Terminal({
+      cols: 80,
+      rows: 24,
+      cursorBlink: true,
+      fontFamily: 'monospace',
+    });
+    term.open(document.getElementById('terminal'));
+
+    const status = document.getElementById('status');
+    const ws = new WebSocket(
+      (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/'
+    );
+    ws.binaryType = 'arraybuffer';
+
+    function encodePacket(kind, payload) {
+      const enc = new TextEncoder();
+      const payloadBytes =
+        typeof payload === 'string' ? enc.encode(payload) : payload;
+      const buf = new Uint8Array(5 + payloadBytes.length);
+      buf[0] = kind.charCodeAt(0);
+      const n = payloadBytes.length;
+      buf[1] = (n >>> 24) & 0xff;
+      buf[2] = (n >>> 16) & 0xff;
+      buf[3] = (n >>> 8) & 0xff;
+      buf[4] = n & 0xff;
+      buf.set(payloadBytes, 5);
+      return buf;
+    }
+
+    /* Stream parser for the framed packet stream. */
+    let inbox = new Uint8Array(0);
+    function feedBytes(chunk) {
+      const next = new Uint8Array(inbox.length + chunk.length);
+      next.set(inbox);
+      next.set(chunk, inbox.length);
+      inbox = next;
+      while (inbox.length >= 5) {
+        const kind = String.fromCharCode(inbox[0]);
+        const n =
+          (inbox[1] << 24) |
+          (inbox[2] << 16) |
+          (inbox[3] << 8) |
+          inbox[4];
+        if (inbox.length < 5 + n) break;
+        const payload = inbox.slice(5, 5 + n);
+        inbox = inbox.slice(5 + n);
+        handlePacket(kind, payload);
+      }
+    }
+
+    function handlePacket(kind, payload) {
+      if (kind === 'D') {
+        /* xterm.js accepts both strings and Uint8Arrays. */
+        term.write(payload);
+      } else if (kind === 'M') {
+        /* Meta — dropped silently in the demo. */
+      } else if (kind === 'P') {
+        /* Server-to-client input echoes are unusual; drop. */
+      }
+    }
+
+    ws.addEventListener('open', () => {
+      status.textContent = 'connected';
+      /* Announce the initial size to the host app. */
+      const payload = `resize|${term.cols}|${term.rows}`;
+      ws.send(encodePacket('M', payload));
+    });
+
+    ws.addEventListener('message', (e) => {
+      if (e.data instanceof ArrayBuffer) {
+        feedBytes(new Uint8Array(e.data));
+      }
+    });
+
+    ws.addEventListener('close', () => {
+      status.textContent = 'disconnected';
+    });
+
+    /* Send keystrokes as P packets. */
+    term.onData((data) => {
+      /* For simplicity the reference HTML encodes each keystroke as a
+       * 'paste' packet (the simplest event shape that round-trips
+       * verbatim through the bridge). A production client would
+       * decode each keypress into a structured key|<name>|<rune>|<mods>
+       * payload that matches src/isonim_tui/drivers/web_driver.nim's
+       * decodeInputPacket — both wire shapes are accepted by the
+       * driver's parser. */
+      ws.send(encodePacket('P', `paste|${data}`));
+    });
+  </script>
+</body>
+</html>
