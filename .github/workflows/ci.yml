@@ -40,6 +40,42 @@ jobs:
           path: test-logs/
           retention-days: 30
 
+  playwright-e2e:
+    name: Playwright e2e (browser drives xterm.js against bridge)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v30
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # Build the bridge + echo_packet_app fixture binaries that the
+      # Playwright spec spawns as a real subprocess.
+      - run: nix develop --command just build
+      - name: Install Playwright deps
+        working-directory: tests/e2e
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Run Playwright e2e suite
+        working-directory: tests/e2e
+        run: npx playwright test
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: tests/e2e/playwright-report/
+          retention-days: 30
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: tests/e2e/test-results/
+          retention-days: 30
+
   charter-matrix:
     name: Charter (${{ matrix.mm }}/${{ matrix.mode }}/threads:${{ matrix.threads }})
     runs-on: ubuntu-latest

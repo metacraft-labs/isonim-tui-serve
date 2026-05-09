@@ -28,26 +28,62 @@ here is the optional serve-as-browser path that completes the
 milestone.
 
 The Playwright e2e test against the live browser
-(`test_serve_browser_e2e` in the milestone doc) is *deferred to a
-future milestone* — it requires browser-automation infrastructure
-that isn't in scope for M26's "real packet I/O" goal. The Nim-side
-bridge has its own integration test
+(`test_serve_browser_e2e`, in `tests/e2e/browser_e2e.spec.ts`) now
+ships alongside the Nim integration test. It spawns a real
+`isonim-tui-serve` subprocess hosting the `echo_packet_app`
+fixture, opens a real Chromium tab against the reference frontend
+in `static/index.html`, types a keystroke into the rendered xterm.js
+terminal, and asserts the fixture's `D` echo packet appears both on
+the WebSocket wire and in the rendered terminal buffer. The Nim-side
+bridge keeps its own integration test
 (`tests/test_serve_packet_bridge.nim`) that runs the server,
-connects with a hand-rolled WebSocket client, exchanges packets
-against a real subprocess, and asserts byte parity.
+connects with a hand-rolled WebSocket client, and asserts byte
+parity without booting a browser.
 
 ## Commands
 
 ```sh
 just build           # compile every test as a smoke check
-just test            # run the integration suite
+just test            # run the integration suite (Nim only)
+just test-e2e        # run the Playwright browser suite (separate target)
 just lint            # nim check + nixfmt --check
 just format          # nimpretty + nixfmt
 ```
 
+### Running the Playwright e2e suite locally
+
+The browser test lives under `tests/e2e/`. It needs Node 20+ and a
+working Chromium. One-time bootstrap:
+
+```sh
+cd tests/e2e
+npm install
+npx playwright install chromium    # ~280 MiB into ~/.cache/ms-playwright
+```
+
+Then:
+
+```sh
+just test-e2e
+# or, from tests/e2e/: npx playwright test
+```
+
+On NixOS the bundled Chromium can't run as a generic dynamically
+linked binary; export `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to point
+at a Nix-built Chromium instead:
+
+```sh
+nix shell nixpkgs#chromium nixpkgs#nodejs_20 -- \
+  bash -c 'PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=$(which chromium) just test-e2e'
+```
+
+The CI job (`playwright-e2e` in `.github/workflows/ci.yml`) runs on
+`ubuntu-latest` where Playwright's bundled binary works directly via
+`npx playwright install --with-deps chromium`.
+
 ## Project structure
 
-```
+```text
 src/
   isonim_tui_serve.nim                # public top-level — async server + handlers
   isonim_tui_serve/packet.nim         # packet (D/M/P) framing
@@ -56,6 +92,10 @@ tests/
   test_serve_packet_bridge.nim        # spawn server, websocket client, real subprocess
   test_serve_packet_framing.nim       # codec round-trip (no I/O)
   test_serve_wsframe_round_trip.nim   # ws codec round-trip (no I/O)
+  e2e/                                # Playwright browser e2e suite
+    package.json
+    playwright.config.ts
+    browser_e2e.spec.ts               # real Chromium against bridge + xterm.js
 static/
   index.html                          # xterm.js + websocket glue
 .github/workflows/ci.yml              # lint + test

@@ -55,6 +55,7 @@
               markdownlint-cli2
               shellcheck
               shfmt
+              nodejs_20
             ];
             shellHook = ''
               ${preCommit.shellHook}

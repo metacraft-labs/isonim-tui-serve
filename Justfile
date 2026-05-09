@@ -51,6 +51,12 @@ test-threads-off:
 
 test-all: test-orc test-arc test-refc test-threads-off
 
+# Run the Playwright browser e2e suite. Requires Node + Chromium —
+# bootstrap with `cd tests/e2e && npm install && npx playwright install chromium`.
+# Builds the bridge and fixture binaries first so the suite can spawn them.
+test-e2e: build
+    cd tests/e2e && npx playwright test
+
 _matrix mm mode threads:
     @mkdir -p test-logs
     @for t in {{tests}}; do \
@@ -75,7 +81,7 @@ lint-nix:
 
 lint-markdown:
     @if command -v markdownlint-cli2 >/dev/null 2>&1; then \
-      markdownlint-cli2 "**/*.md" "#node_modules" "#test-logs" || true; \
+      markdownlint-cli2 "**/*.md" "#**/node_modules/**" "#test-logs/**" "#tests/e2e/playwright-report/**" || true; \
     else \
       echo "markdownlint-cli2 not available; skipping"; \
     fi
