@@ -28,8 +28,9 @@ import std/sha1 as sha1Mod
 
 import ./isonim_tui_serve/packet
 import ./isonim_tui_serve/wsframe
+import ./isonim_tui_serve/story_dispatch
 
-export packet, wsframe
+export packet, wsframe, story_dispatch
 
 const
   WebSocketGuid* = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
