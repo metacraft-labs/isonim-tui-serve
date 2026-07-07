@@ -1,0 +1,9 @@
+schema = "reprobuild.solved-graph-lock.v2"
+
+[lock]
+platform = "amd64-linux"
+optimal = false
+inputs_digest = "fnv1a64:0d7a658e1b4c42e5"
+variants = []
+packages = [{ name = "gcc", version = "12.0.0", source = "gcc" }, { name = "isonim_tui_serve", version = "0.1.0", source = "isonim_tui_serve" }, { name = "nim", version = "2.0.0", source = "nim" }]
+deps = [{ name = "isonim-tui-serve", path = ".", coord_kind = "vcs", url = "https://github.com/metacraft-labs/isonim-tui-serve", ref = "mcr-stege0-and-fixes", revision = "7acdb717df3a9c12f59c8b8d9ce0d02263f5cf23", integrity = "git-sha1:7acdb717df3a9c12f59c8b8d9ce0d02263f5cf23", version = "", visibility = "public", participation = "", depends = "", groups = "" }]
