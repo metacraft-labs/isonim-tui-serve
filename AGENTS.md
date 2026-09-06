@@ -15,9 +15,15 @@ its `D`/`M`/`P` stdio packet stream to/from a browser tab running
 - One-process bridge: launch a hosted app, pipe each WebSocket
   binary frame's payload (one full packet) into the child's stdin,
   pump the child's stdout through the WebSocket back to the
-  browser.
+  browser. The child's stderr is drained onto the bridge's own
+  (prefixed `[app]`) and the child is reaped when the connection
+  closes.
 - Reference HTML/JS in `static/` that mounts xterm.js (CDN-hosted)
   and exchanges packets with the bridge.
+- An in-memory static bundle (`ServeConfig.staticFiles`) for hosts
+  that embed their frontend in their own executable, and a split
+  `listen` / `boundPort` / `acceptLoop` so a caller can bind
+  `Port(0)` and report the port the kernel chose.
 
 ## Status (M26)
 
@@ -115,6 +121,32 @@ nim c -d:release -o:isonim-tui-serve src/isonim_tui_serve.nim
 
 # 3. Open http://localhost:8765/ in a browser.
 ```
+
+`--address <ip>` binds one interface instead of all of them, and
+`--port 0` asks the kernel for an ephemeral port — the line the CLI
+prints then carries the port that was actually bound, flushed before
+the first accept, so a supervisor or a test never has to guess one.
+
+## Embedding the server
+
+```nim
+let server = newServer(ServeConfig(
+  port: Port(0),                 # the kernel chooses
+  address: "127.0.0.1",          # "" for every interface
+  staticDir: "",                 # optional when staticFiles is set
+  staticFiles: @[StaticFile(path: "/index.html",
+                            mime: "text/html; charset=utf-8",
+                            body: myEmbeddedPage)],
+  launchApp: launcher))
+server.listen()                  # bind, do not accept yet
+echo "listening on port ", int(server.boundPort())
+waitFor server.acceptLoop()      # `serve()` is these three in a row
+```
+
+`staticFiles` is consulted before `staticDir`, so an embedded page
+cannot be shadowed by a same-named file in the working directory.
+`boundPort` is meaningful only after `listen` — `ServeConfig.port`
+still reads `0`.
 
 ## Specs
 
