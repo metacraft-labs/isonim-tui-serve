@@ -25,7 +25,7 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: lint-logs-${{ matrix.runner }}
+          name: lint-logs-${{ join(matrix.runner, '-') }}
           path: test-logs/
           retention-days: 30
 
@@ -48,7 +48,7 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-logs-${{ matrix.runner }}
+          name: test-logs-${{ join(matrix.runner, '-') }}
           path: test-logs/
           retention-days: 30
 
@@ -84,13 +84,13 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report-${{ matrix.runner }}
+          name: playwright-report-${{ join(matrix.runner, '-') }}
           path: tests/e2e/playwright-report/
           retention-days: 30
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-test-results-${{ matrix.runner }}
+          name: playwright-test-results-${{ join(matrix.runner, '-') }}
           path: tests/e2e/test-results/
           retention-days: 30
 
@@ -116,6 +116,6 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: charter-${{ matrix.mm }}-${{ matrix.mode }}-${{ matrix.threads }}-${{ matrix.runner }}
+          name: charter-${{ matrix.mm }}-${{ matrix.mode }}-${{ matrix.threads }}-${{ join(matrix.runner, '-') }}
           path: test-logs/
           retention-days: 30
