@@ -24,6 +24,13 @@ build:
       nim c {{nim-flags}} {{src-paths}} --mm:orc -d:release --threads:on \
           -o:test-logs/$(basename $t .nim) $t 2>&1 | tee -a test-logs/build.log; \
     done
+    # The hosted-app fixture, next to its source where the suites expect it.
+    # The Nim bridge suites compile it on demand, but `test-e2e` only runs
+    # `build` and then Playwright — so without this the browser suite stops
+    # at "fixture not found" and never reaches an assertion.
+    @echo "Building tests/echo_packet_app"
+    nim c {{nim-flags}} {{src-paths}} --mm:orc -d:release --threads:on \
+        -o:tests/echo_packet_app tests/echo_packet_app.nim 2>&1 | tee -a test-logs/build.log
 
 test: test-orc
 
