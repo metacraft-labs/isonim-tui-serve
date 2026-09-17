@@ -110,6 +110,8 @@ tests/
   test_serve_bridge_child_io.nim      # stream integrity, stderr drain, reaping, bind(0)
   test_serve_packet_framing.nim       # codec round-trip (no I/O)
   test_serve_wsframe_round_trip.nim   # ws codec round-trip (no I/O)
+  test_serve_element_tree_roundtrip.nim  # element-tree body codec (no I/O)
+  test_serve_select_story_roundtrip.nim  # select-story/apply-mutation codec (no I/O)
   e2e/                                # Playwright browser e2e suite
     package.json
     playwright.config.ts

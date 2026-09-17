@@ -8,7 +8,12 @@ alias fmt := format
 src-paths := "--path:src --path:tests"
 nim-flags := "--styleCheck:usages --styleCheck:error"
 
-tests := "tests/test_serve_packet_framing.nim tests/test_serve_wsframe_round_trip.nim tests/test_serve_packet_bridge.nim"
+# EVERY runnable suite under tests/. A name missing from this list is a
+# suite that never runs — `just test`, `just build` and `just lint` all
+# iterate it, and CI calls nothing else. The two round-trip suites below
+# had been absent since they were written, so no gate had ever executed
+# them; keep this list and `tests/` in step whenever a suite is added.
+tests := "tests/test_serve_packet_framing.nim tests/test_serve_wsframe_round_trip.nim tests/test_serve_element_tree_roundtrip.nim tests/test_serve_select_story_roundtrip.nim tests/test_serve_packet_bridge.nim tests/test_serve_bridge_child_io.nim"
 
 build:
     @mkdir -p test-logs
@@ -24,7 +29,8 @@ test: test-orc
 
 test-unit:
     @mkdir -p test-logs
-    @for t in tests/test_serve_packet_framing.nim tests/test_serve_wsframe_round_trip.nim; do \
+    @for t in tests/test_serve_packet_framing.nim tests/test_serve_wsframe_round_trip.nim \
+              tests/test_serve_element_tree_roundtrip.nim tests/test_serve_select_story_roundtrip.nim; do \
       echo "[unit] $t"; \
       nim c {{nim-flags}} {{src-paths}} --mm:orc -d:release --threads:on \
           -r $t 2>&1 | tee -a test-logs/test-unit.log; \
@@ -32,7 +38,7 @@ test-unit:
 
 test-integration:
     @mkdir -p test-logs
-    @for t in tests/test_serve_packet_bridge.nim; do \
+    @for t in tests/test_serve_packet_bridge.nim tests/test_serve_bridge_child_io.nim; do \
       echo "[integration] $t"; \
       nim c {{nim-flags}} {{src-paths}} --mm:orc -d:release --threads:on \
           -r $t 2>&1 | tee -a test-logs/test-integration.log; \

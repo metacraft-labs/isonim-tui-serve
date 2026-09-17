@@ -3,6 +3,11 @@ test-logs/
 nim-cache/
 bench-results/
 
+# reprobuild engine outputs — `repro build` / `repro test` write the test
+# binaries named in repro.nim here, plus its own working state.
+build/
+.repro/
+
 # direnv local state.
 .direnv/
 

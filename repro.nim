@@ -66,9 +66,9 @@
 ##
 ## **Per-test platform gating.** Enumerating EVERY ``tests/*.nim`` and
 ## re-deriving each file's guards from its imports (the ``Justfile``
-## ``tests`` list names only three of the five suites — it is stale w.r.t.
-## the two RS-M13 round-trip suites, which are real ``suite`` tests and are
-## included here):
+## ``tests`` list now names the same six suites; it used to omit the two
+## RS-M13 round-trip suites, which are real ``suite`` tests and were
+## already included here):
 ##
 ##   * ``test_serve_packet_framing`` / ``test_serve_wsframe_round_trip`` /
 ##     ``test_serve_element_tree_roundtrip`` / ``test_serve_select_story_roundtrip``
@@ -86,16 +86,28 @@
 ##     unconditionally (it compiles on all hosts; the in-``test`` guard is
 ##     the file's own concern, exactly as ``nim-pty``'s
 ##     ``test_pty_cross_platform`` handles its Windows arm).
+##   * ``test_serve_bridge_child_io`` — the bridge's child-process contract
+##     (stream integrity under a merged stderr, the stderr drain under a
+##     flood, child reaping, ``Port(0)``, the in-memory static bundle).
+##     Same shape as the bridge test: every ``test`` body is
+##     ``when defined(windows): skip() else: <real body>``, so it compiles
+##     everywhere and runs for real on POSIX, and it shares the bridge
+##     test's capacity-1 pool because it too forks children and binds
+##     sockets.
 ##   * ``echo_packet_app.nim`` — a runnable FIXTURE (``import isonim_tui_serve``,
 ##     a ``proc main()`` stdin/stdout echo child), NOT a ``suite`` test. It
 ##     is compiled on demand by ``test_serve_packet_bridge`` at run time
 ##     (``nim c … -o:tests/echo_packet_app``) and is never listed in the
 ##     repo's ``tests`` set. It therefore gets NO edge here — only a
-##     transitive runtime input of the bridge test.
+##     transitive runtime input of the bridge tests. Both bridge suites
+##     rebuild it when ``echo_packet_app.nim`` is NEWER than the binary,
+##     not merely when the binary is absent: it is gitignored build output
+##     that survives a branch switch, so an absence check would silently
+##     test a stale child.
 ##
 ## No test file in this repo is host-EXCLUSIVE to a non-Linux OS: every one
 ## either has no OS gate or an in-``test`` ``when defined(windows): skip()
-## else: <real body>``, so all five suites are in the Linux graph and there
+## else: <real body>``, so all six suites are in the Linux graph and there
 ## are no ``when defined(...)`` extraction gates needed on this host.
 ##
 ## **Subprocess serialization.** ``test_serve_packet_bridge`` forks a real
@@ -158,6 +170,12 @@ const serveTestSpecs: seq[ServeTestSpec] = @[
   # everywhere, runs the real round-trip on this POSIX host.
   ServeTestSpec(source: "tests/test_serve_packet_bridge.nim",
     binary: "build/test-bin/test_serve_packet_bridge", pool: bridgePool),
+  # The bridge's child-process contract — stream integrity under a merged
+  # stderr, the stderr drain under a flood, child reaping, ``Port(0)`` and
+  # the in-memory static bundle. Spawns a real child and binds a real
+  # socket, so it shares the bridge test's capacity-1 pool.
+  ServeTestSpec(source: "tests/test_serve_bridge_child_io.nim",
+    binary: "build/test-bin/test_serve_bridge_child_io", pool: bridgePool),
 ]
 
 package isonim_tui_serve:
