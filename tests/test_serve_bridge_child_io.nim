@@ -223,19 +223,41 @@ proc pumpDispatcher(ms: int) =
       sleep(20)
 
 proc procState(pid: int): char =
-  ## `'-'` when the process is gone, otherwise its `/proc` state letter
-  ## (`'Z'` for a zombie). The `comm` field may contain spaces and
-  ## parentheses, so the state is read relative to the LAST `')'`.
-  let statPath = "/proc/" & $pid & "/stat"
-  if not fileExists(statPath): return '-'
-  var raw = ""
-  try:
-    raw = readFile(statPath)
-  except CatchableError:
-    return '-'
-  let close = raw.rfind(')')
-  if close < 0 or close + 2 >= raw.len: return '-'
-  raw[close + 2]
+  ## `'-'` when the process has left the process table, otherwise its state
+  ## letter (`'Z'` for a zombie).
+  ##
+  ## `/proc` where there is one, `ps` where there is not. macOS has no
+  ## `/proc`, and a `/proc`-only reader does not merely fail to see the child
+  ## there — it answers `'-'` for EVERY pid, which reads as "already gone".
+  ## That is the dangerous direction: the liveness check below fails loudly,
+  ## but "the child left the process table" would pass without a child ever
+  ## having existed. A check that cannot distinguish the two states must not
+  ## be allowed to report the one it is looking for.
+  when defined(linux):
+    let statPath = "/proc/" & $pid & "/stat"
+    if not fileExists(statPath): return '-'
+    var raw = ""
+    try:
+      raw = readFile(statPath)
+    except CatchableError:
+      return '-'
+    # The `comm` field may contain spaces and parentheses, so the state is
+    # read relative to the LAST `')'`.
+    let close = raw.rfind(')')
+    if close < 0 or close + 2 >= raw.len: return '-'
+    raw[close + 2]
+  else:
+    # `ps -o state= -p <pid>` is POSIX and prints nothing for a pid that is
+    # gone. BSD/macOS decorates the letter (`S+`, `Z`), so take the first.
+    var output = ""
+    var code = 1
+    try:
+      (output, code) = execCmdEx("ps -o state= -p " & $pid)
+    except CatchableError:
+      return '-'
+    let s = output.strip()
+    if code != 0 or s.len == 0: return '-'
+    s[0]
 
 template captureStderr(sink: var string; body: untyped) =
   ## Redirect fd 2 to a temp file for the duration of `body`, then read it
