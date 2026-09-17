@@ -223,41 +223,42 @@ proc pumpDispatcher(ms: int) =
       sleep(20)
 
 proc procState(pid: int): char =
-  ## `'-'` when the process has left the process table, otherwise its state
-  ## letter (`'Z'` for a zombie).
+  ## `'-'` when the process has LEFT the process table; otherwise a letter
+  ## describing it — `'Z'` for a zombie where that is cheaply knowable,
+  ## `'A'` where only its presence is.
   ##
-  ## `/proc` where there is one, `ps` where there is not. macOS has no
-  ## `/proc`, and a `/proc`-only reader does not merely fail to see the child
-  ## there — it answers `'-'` for EVERY pid, which reads as "already gone".
-  ## That is the dangerous direction: the liveness check below fails loudly,
-  ## but "the child left the process table" would pass without a child ever
-  ## having existed. A check that cannot distinguish the two states must not
-  ## be allowed to report the one it is looking for.
+  ## Presence is decided by `kill(pid, 0)`: a syscall, not a lookup in a
+  ## filesystem that may not exist (`/proc`, absent on macOS) and not a spawn
+  ## of a tool that may not be on `PATH` (`ps`, not guaranteed inside a
+  ## `nix develop` shell). Both of those answer "no such process" when what
+  ## they mean is "I could not look" — and that is the one wrong answer this
+  ## check cannot tolerate, because it is the answer the test is waiting for.
+  ## A reader that cannot tell "gone" from "cannot see" would report the
+  ## child reaped on any host it does not understand.
+  ##
+  ## A zombie still holds its table entry, so `kill` succeeds for it and
+  ## starts failing only once the bridge has reaped it — which is exactly
+  ## the transition under test. (`kill` can also fail with `EPERM` for a
+  ## process we may not signal; not reachable here, where the process in
+  ## question is this test's own grandchild.)
+  if posix.kill(Pid(pid), cint(0)) != cint(0):
+    return '-'
   when defined(linux):
+    # A real state letter where one is free, so a failure reads "zombie"
+    # rather than merely "still there".
     let statPath = "/proc/" & $pid & "/stat"
-    if not fileExists(statPath): return '-'
-    var raw = ""
-    try:
-      raw = readFile(statPath)
-    except CatchableError:
-      return '-'
-    # The `comm` field may contain spaces and parentheses, so the state is
-    # read relative to the LAST `')'`.
-    let close = raw.rfind(')')
-    if close < 0 or close + 2 >= raw.len: return '-'
-    raw[close + 2]
-  else:
-    # `ps -o state= -p <pid>` is POSIX and prints nothing for a pid that is
-    # gone. BSD/macOS decorates the letter (`S+`, `Z`), so take the first.
-    var output = ""
-    var code = 1
-    try:
-      (output, code) = execCmdEx("ps -o state= -p " & $pid)
-    except CatchableError:
-      return '-'
-    let s = output.strip()
-    if code != 0 or s.len == 0: return '-'
-    s[0]
+    if fileExists(statPath):
+      var raw = ""
+      try:
+        raw = readFile(statPath)
+      except CatchableError:
+        raw = ""
+      # The `comm` field may contain spaces and parentheses, so the state is
+      # read relative to the LAST `')'`.
+      let closeParen = raw.rfind(')')
+      if closeParen >= 0 and closeParen + 2 < raw.len:
+        return raw[closeParen + 2]
+  'A'
 
 template captureStderr(sink: var string; body: untyped) =
   ## Redirect fd 2 to a temp file for the duration of `body`, then read it
@@ -314,13 +315,17 @@ proc chattyFlow(port: int; marker: string;
   sock.close()
   return got
 
-proc pidFlow(port: int): Future[string] {.async.} =
-  ## Ask the child for its own pid, then hang up.
+proc pidFlow(port: int): Future[(AsyncSocket, string)] {.async.} =
+  ## Ask the child for its own pid and return it with the socket STILL OPEN,
+  ## so the caller can confirm the pid names a live process before hanging
+  ## up. Closing here instead would leave "is it alive?" a question about
+  ## whether the bridge had had a turn yet; leaving the connection open makes
+  ## it a question about nothing — the bridge does not tear down a child
+  ## whose browser is still connected.
   let sock = await connectWs(port)
   await sendPacket(sock, PacketTypeMeta, "pid")
   let got = await collectPayloads(sock, 1)
-  sock.close()
-  return (if got.len == 1: got[0] else: "")
+  return (sock, if got.len == 1: got[0] else: "")
 
 # ---------------------------------------------------------------------------
 
@@ -402,15 +407,15 @@ suite "isonim-tui-serve: bridge child I/O":
         launchApp: makeLauncher(fixturePath(), mergeStderr = false)))
       let port = int(server.boundPort())
 
-      let answer = waitFor pidFlow(port)
-      check answer.startsWith("pid:")
+      let (sock, answer) = waitFor pidFlow(port)
+      require answer.startsWith("pid:")
       let childPid = parseInt(answer[4 ..^ 1])
-      # Still alive here by construction, not by luck: `pidFlow` closes the
-      # socket synchronously after its last `await`, so `waitFor` returns
-      # without polling again and the bridge has had no turn to notice the
-      # hang-up. This asserts the pid is a real process, not that we won a
-      # race with the reaper.
+      # The connection is STILL OPEN here, so the bridge has not begun to
+      # tear anything down and this cannot be a race with the reaper: it
+      # asserts only that the pid the child reported names a real process,
+      # which is what makes the disappearance below mean something.
       check procState(childPid) != '-'
+      sock.close()
 
       var state = procState(childPid)
       let deadline = epochTime() + float(ReapTimeoutMs) / 1000.0
