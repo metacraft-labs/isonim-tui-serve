@@ -205,7 +205,23 @@ proc drainChildStderr(child: Process) {.async.} =
   ##
   ## Prefixed, so an operator can tell the bridge's own diagnostics from the
   ## hosted app's.
+  ##
+  ## NO-OP WHEN THE CHILD HAS ONLY ONE PIPE. `startProcess` with
+  ## `poStdErrToStdOut` sets `errHandle = outHandle` (osproc, POSIX branch) —
+  ## the same fd under two names, not two fds. There is then no second pipe
+  ## that can fill, so the hang above is not reachable and this proc has
+  ## nothing to prevent; what it *would* do is become a second reader of the
+  ## packet stream, and `read(2)` gives each chunk to exactly one reader. The
+  ## packets it won would never reach the browser — they would be printed
+  ## here, as `[app]`-prefixed lines, which is precisely how the defect was
+  ## first seen. Measured before this guard: 400 packets sent, 1 delivered.
+  ##
+  ## The check lives HERE rather than at the call sites because `AppLauncher`
+  ## is supplied by the host: this library cannot choose the child's process
+  ## options, only refuse to read a pipe that is already being read.
   let fd = cint(child.errorHandle)
+  if fd == cint(child.outputHandle):
+    return
   setNonBlocking(fd)
   var rawBuf: array[4096, byte]
   while true:
@@ -414,8 +430,15 @@ when isMainModule:
       port: Port(port),
       address: address,
       staticDir: staticDir,
+      # NOT `poStdErrToStdOut`. The child's stdout is a *framed* wire — a
+      # 1-byte kind and a 4-byte big-endian length per packet — so merging
+      # stderr into it does not add noise, it desynchronises the stream: a
+      # log line like "hello" is read as kind 'h' with a length of
+      # 0x656c6c6f, and the parser then waits for 1.7 GB that never comes.
+      # A separate stderr pipe keeps the app's diagnostics off the wire, and
+      # `drainChildStderr` relays them here prefixed with `[app]`.
       launchApp: proc (): Process =
-        startProcess(exe, args = args, options = {poUsePath, poStdErrToStdOut}))
+        startProcess(exe, args = args, options = {poUsePath}))
     let s = newServer(cfg)
     # LISTEN, THEN REPORT, THEN ACCEPT. `--port 0` asks the kernel to choose
     # and the answer only exists after the bind, so the line below prints the

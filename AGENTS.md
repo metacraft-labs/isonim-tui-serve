@@ -18,6 +18,17 @@ its `D`/`M`/`P` stdio packet stream to/from a browser tab running
   browser. The child's stderr is drained onto the bridge's own
   (prefixed `[app]`) and the child is reaped when the connection
   closes.
+- **Launch the hosted app without `poStdErrToStdOut`.** The child's
+  stdout is a framed wire — one byte of kind, four big-endian bytes
+  of length, per packet — so merging stderr into it does not
+  annotate the stream, it desynchronises it: a log line `hello`
+  parses as kind `h` with a length of `0x656c6c6f`, and the parser
+  then waits for 1.7 GB that never arrives. A separate stderr pipe
+  keeps the app's diagnostics off the wire, and the drain relays
+  them. The bridge survives a host that merges them anyway — the
+  drain notices `errorHandle == outputHandle` and stands down rather
+  than becoming a second reader of the packet stream — but nothing
+  can un-merge the bytes once the child has written them.
 - Reference HTML/JS in `static/` that mounts xterm.js (CDN-hosted)
   and exchanges packets with the bridge.
 - An in-memory static bundle (`ServeConfig.staticFiles`) for hosts
@@ -96,6 +107,7 @@ src/
   isonim_tui_serve/wsframe.nim        # RFC 6455 frame codec
 tests/
   test_serve_packet_bridge.nim        # spawn server, websocket client, real subprocess
+  test_serve_bridge_child_io.nim      # stream integrity, stderr drain, reaping, bind(0)
   test_serve_packet_framing.nim       # codec round-trip (no I/O)
   test_serve_wsframe_round_trip.nim   # ws codec round-trip (no I/O)
   e2e/                                # Playwright browser e2e suite

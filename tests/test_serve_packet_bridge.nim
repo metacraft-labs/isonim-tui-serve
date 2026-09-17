@@ -22,7 +22,7 @@
 ## production codec going both directions.
 
 import std/[asyncdispatch, asyncnet, base64, nativesockets, net, os,
-            osproc, random, strutils, unittest]
+            osproc, random, strutils, times, unittest]
 
 import isonim_tui_serve
 
@@ -31,8 +31,12 @@ import isonim_tui_serve
 proc fixturePath(): string =
   let here = currentSourcePath().parentDir
   let outBin = here / "echo_packet_app"
-  if not fileExists(outBin):
-    let src = here / "echo_packet_app.nim"
+  let src = here / "echo_packet_app.nim"
+  # Rebuild when the source is newer, not merely when the binary is absent:
+  # the fixture binary is gitignored build output that survives across
+  # branches, and a stale one would silently test the wrong child.
+  if not fileExists(outBin) or
+     getLastModificationTime(src) > getLastModificationTime(outBin):
     let cmd = "nim c -d:release --threads:on --hints:off --warnings:off " &
               "--path:" & here / ".." / "src" & " " &
               "-o:" & outBin & " " & src
@@ -123,10 +127,13 @@ suite "isonim-tui-serve: packet bridge integration":
       let appExe = fixturePath()
       let port = pickPort()
       let appExeCap = appExe
+      # NOT `poStdErrToStdOut` — the child's stdout is a framed wire, so a
+      # merged stderr desynchronises it rather than merely annotating it.
+      # `tests/test_serve_bridge_child_io.nim` covers the merged case
+      # deliberately, as the misconfiguration the bridge must survive.
       proc launcher(): Process {.closure, gcsafe.} =
         {.cast(gcsafe).}:
-          startProcess(appExeCap, args = @[],
-                       options = {poStdErrToStdOut})
+          startProcess(appExeCap, args = @[], options = {})
       let cfg = ServeConfig(
         port: Port(port),
         staticDir: ".",
