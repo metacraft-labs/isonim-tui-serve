@@ -13,7 +13,7 @@ nim-flags := "--styleCheck:usages --styleCheck:error"
 # iterate it, and CI calls nothing else. The two round-trip suites below
 # had been absent since they were written, so no gate had ever executed
 # them; keep this list and `tests/` in step whenever a suite is added.
-tests := "tests/test_serve_packet_framing.nim tests/test_serve_wsframe_round_trip.nim tests/test_serve_element_tree_roundtrip.nim tests/test_serve_select_story_roundtrip.nim tests/test_serve_packet_bridge.nim tests/test_serve_bridge_child_io.nim"
+tests := "tests/test_serve_packet_framing.nim tests/test_serve_wsframe_round_trip.nim tests/test_serve_element_tree_roundtrip.nim tests/test_serve_select_story_roundtrip.nim tests/test_serve_packet_bridge.nim tests/test_serve_bridge_child_io.nim tests/test_nimcache_is_worktree_local.nim"
 
 build:
     @mkdir -p test-logs
