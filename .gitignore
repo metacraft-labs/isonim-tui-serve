@@ -15,6 +15,7 @@ build/
 tests/test_*
 !tests/test_*.nim
 !tests/test_*.cfg
+!tests/test_*.sh
 tests/echo_packet_app
 !tests/echo_packet_app.nim
 
