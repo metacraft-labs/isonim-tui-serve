@@ -104,6 +104,19 @@
               shfmt
               nodejs_20
             ];
+            # Playwright's own `playwright install` downloads glibc/FHS browser
+            # builds that cannot start on NixOS hosts (including the NixOS
+            # self-hosted CI runners). On Linux the e2e suite therefore runs
+            # against nixpkgs' patched browsers; the npm `@playwright/test`
+            # must be the SAME version as playwright-driver or it looks for
+            # browser revisions that are not in this store path, which is why
+            # the version is exported for CI to install exactly.
+            env = pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+              PLAYWRIGHT_BROWSERS_PATH = "${pkgs.playwright-driver.browsers}";
+              PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
+              PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
+              PLAYWRIGHT_NIX_VERSION = pkgs.playwright-driver.version;
+            };
             shellHook = ''
               ${ownRepoOnly preCommit.shellHook}
               echo "isonim-tui-serve dev shell - nim $(nim --version 2>&1 | head -1)"

@@ -75,20 +75,31 @@ jobs:
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
           substituters: ${{ vars.SUBSTITUTERS }}
           nix-github-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+      # Node and (on Linux) the browsers come from the dev shell, not from
+      # actions/setup-node / `playwright install`: both download glibc builds
+      # that fail on the NixOS self-hosted runners with "Could not start
+      # dynamically linked executable". The dev shell exports
+      # PLAYWRIGHT_BROWSERS_PATH (nixpkgs playwright-driver.browsers) and
+      # PLAYWRIGHT_NIX_VERSION, and @playwright/test is installed at exactly
+      # that version so it looks for the browser revisions the store has.
+      # macOS has no nixpkgs browser bundle, so it still downloads Chromium.
       # Build the bridge + echo_packet_app fixture binaries that the
       # Playwright spec spawns as a real subprocess.
       - run: nix develop --command just build
       - name: Install Playwright deps
         working-directory: tests/e2e
         run: |
-          npm install --no-audit --no-fund
-          npx playwright install --with-deps chromium
+          nix develop ../.. --command bash -euo pipefail -c '
+            if [ -n "${PLAYWRIGHT_NIX_VERSION:-}" ]; then
+              npm install --no-audit --no-fund --no-save "@playwright/test@${PLAYWRIGHT_NIX_VERSION}"
+            else
+              npm install --no-audit --no-fund
+              npx playwright install chromium
+            fi
+          '
       - name: Run Playwright e2e suite
         working-directory: tests/e2e
-        run: npx playwright test
+        run: nix develop ../.. --command npx playwright test
       - if: always()
         uses: actions/upload-artifact@v4
         with:
