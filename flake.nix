@@ -124,6 +124,22 @@
               PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
               PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
               PLAYWRIGHT_NIX_VERSION = pkgs.playwright-driver.version;
+              # The browser's fonts, from the store rather than the host.
+              # Headless Playwright launches `chromium_headless_shell`, which
+              # nixpkgs ships as a bare executable with fontconfig built in
+              # and, unlike the `chromium` wrapper beside it, no
+              # FONTCONFIG_FILE of its own: it reads the host's /etc/fonts.
+              # A runner with no fonts there gives xterm.js a zero-size
+              # character cell, so the terminal lays out as a 0x0 screen, a
+              # click on it never focuses xterm's input, and the typed key
+              # never reaches the page's WebSocket. The system font
+              # directories and /etc/fonts/conf.d are left out, so a
+              # workstation renders with the same fonts as CI.
+              FONTCONFIG_FILE = pkgs.makeFontsConf {
+                fontDirectories = [ pkgs.dejavu_fonts ];
+                impureFontDirectories = [ ];
+                includes = [ ];
+              };
             };
             shellHook = ''
               ${ownRepoOnly installGitHooks}

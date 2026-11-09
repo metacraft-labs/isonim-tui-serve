@@ -169,6 +169,17 @@ test.describe('isonim-tui-serve: browser e2e', () => {
       { timeout: 20_000 }
     );
 
+    // xterm.js sizes its screen from a measured character cell. In a browser
+    // that found no font the cell measures 0x0, the screen collapses to
+    // nothing, a click on it never focuses xterm's input, and the keystroke
+    // typed below is lost. Fail here with that diagnosis instead of as a
+    // missing echo after the poll timeout.
+    const screen = await page.locator('.xterm-screen').boundingBox();
+    expect(
+      screen?.width ?? 0,
+      'xterm.js laid the terminal out at zero width: the browser has no usable font'
+    ).toBeGreaterThan(0);
+
     // Expose the Terminal instance for buffer inspection. The page
     // script declares `term` as a `const` inside its IIFE; we walk
     // the rendered DOM to find the xterm container and ask for the
