@@ -30,7 +30,17 @@ its `D`/`M`/`P` stdio packet stream to/from a browser tab running
   than becoming a second reader of the packet stream — but nothing
   can un-merge the bytes once the child has written them.
 - Reference HTML/JS in `static/` that mounts xterm.js (CDN-hosted)
-  and exchanges packets with the bridge.
+  and exchanges packets with the bridge. It loads the WebGL renderer
+  (the canvas one where WebGL is unavailable) with `customGlyphs`, so
+  xterm.js draws box-drawing and block elements itself, and the
+  Unicode 11 width table.
+- The client's capabilities, DECLARED: xterm.js behind the bridge
+  cannot answer an app's start-up queries (a reply would have to come
+  back as input), so the page's first packet is `M caps|<json>` —
+  the xterm.js version, the renderer, `customGlyphs`, the Unicode
+  width table, truecolor and SGR mouse (`ClientCaps`,
+  `encodeCapsMeta` / `decodeCapsMeta` in `packet.nim`). A hosted app
+  reads it as its answers and asks nothing.
 - An in-memory static bundle (`ServeConfig.staticFiles`) for hosts
   that embed their frontend in their own executable, and a split
   `listen` / `boundPort` / `acceptLoop` so a caller can bind

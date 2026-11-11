@@ -16,6 +16,12 @@
 ##                    any `n` above the 64 KiB pipe capacity wedges this
 ##                    process mid-write and the `D` never comes.
 ##   * `quit`       — exit.
+##   * `caps|<json>` — a client's capability declaration: decode it with
+##                    the library's own `decodeCapsMeta` and answer
+##                    `D "caps:<renderer>,<unicodeVersion>,<customGlyphs>"`,
+##                    or `D "caps-refused:<reason>"`. The browser suite reads
+##                    this answer off the page's own terminal, so it proves
+##                    the page's declaration reached the app and decodes.
 
 import std/[posix, strutils]
 import isonim_tui_serve
@@ -48,6 +54,13 @@ proc main() =
       elif kind == 'M':
         if payload == "quit":
           return
+        elif payload.isCapsMeta:
+          try:
+            let c = decodeCapsMeta(payload)
+            writeAll(STDOUT_FILENO, encodePacket('D', "caps:" & c.renderer &
+              "," & c.unicodeVersion & "," & $c.customGlyphs))
+          except TuiPacketProtocolError as e:
+            writeAll(STDOUT_FILENO, encodePacket('D', "caps-refused:" & e.msg))
         elif payload == "pid":
           writeAll(STDOUT_FILENO, encodePacket('D', "pid:" & $getpid()))
         elif payload.startsWith("log:"):

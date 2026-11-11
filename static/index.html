@@ -36,6 +36,15 @@
   <div id="terminal"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+  <!--
+    The renderer that draws box-drawing and block elements ITSELF (WebGL, or
+    canvas where WebGL is unavailable), and the Unicode 11 width table: then
+    xterm.js's widths match an app's modern tables except for code points
+    newer than Unicode 11 (CodeTracer-TUI-Terminal-Adaptation.md §3.5).
+  -->
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-webgl@0.16.0/lib/xterm-addon-webgl.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-canvas@0.5.0/lib/xterm-addon-canvas.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-unicode11@0.6.0/lib/xterm-addon-unicode11.min.js"></script>
   <script>
     /*
      * Reference HTML/JS bridge — pairs with isonim-tui's M26 WebDriver
@@ -52,14 +61,64 @@
      *   * 'M' packets carry meta events to/from the server.
      *   * 'P' packets carry input events from the browser to the
      *     server (key, mouse, resize).
+     *   * The FIRST packet is 'M caps|<json>': this client's capabilities,
+     *     declared, because xterm.js behind the bridge cannot answer a
+     *     program's start-up queries (src/isonim_tui_serve/packet.nim,
+     *     `ClientCaps`).
      */
+    const XTERM_JS_VERSION = '5.3.0';
     const term = new Terminal({
       cols: 80,
       rows: 24,
       cursorBlink: true,
       fontFamily: 'monospace',
+      // Box-drawing and block elements drawn by xterm.js, not the font.
+      // Honoured by the WebGL and canvas renderers; the DOM one draws them
+      // from the font.
+      customGlyphs: true,
+      // The Unicode 11 addon is a proposed API in xterm.js 5.
+      allowProposedApi: true,
     });
     term.open(document.getElementById('terminal'));
+
+    /* The renderer: WebGL, else canvas, else xterm.js's DOM renderer. */
+    let renderer = 'dom';
+    try {
+      const webgl = new WebglAddon.WebglAddon();
+      webgl.onContextLoss(() => webgl.dispose());
+      term.loadAddon(webgl);
+      renderer = 'webgl';
+    } catch (e) {
+      try {
+        term.loadAddon(new CanvasAddon.CanvasAddon());
+        renderer = 'canvas';
+      } catch (e2) {
+        renderer = 'dom';
+      }
+    }
+    let unicodeVersion = '6';
+    try {
+      term.loadAddon(new Unicode11Addon.Unicode11Addon());
+      term.unicode.activeVersion = '11';
+      unicodeVersion = term.unicode.activeVersion;
+    } catch (e) {
+      unicodeVersion = '6';
+    }
+    /* Field order fixed, as `encodeCapsMeta` writes it. */
+    const caps =
+      'caps|' +
+      JSON.stringify({
+        xtermJs: XTERM_JS_VERSION,
+        renderer: renderer,
+        customGlyphs: renderer !== 'dom',
+        unicodeVersion: unicodeVersion,
+        truecolor: true,
+        sgrMouse: true,
+      });
+    /* For the browser suite: the WebGL and canvas renderers draw on a
+     * canvas, so the screen's text is read from xterm.js's buffer. */
+    window.__ttyCaps = caps;
+    window.__ttyTerm = term;
 
     const status = document.getElementById('status');
     const ws = new WebSocket(
@@ -116,6 +175,8 @@
 
     ws.addEventListener('open', () => {
       status.textContent = 'connected';
+      /* Declare the client first, so the app has it before its first frame. */
+      ws.send(encodePacket('M', caps));
       /* Announce the initial size to the host app. */
       const payload = `resize|${term.cols}|${term.rows}`;
       ws.send(encodePacket('M', payload));

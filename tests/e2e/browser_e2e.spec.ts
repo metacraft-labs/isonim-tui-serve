@@ -13,6 +13,9 @@
  *   4. Receive the fixture's echoed `D` packet (`echo:paste|<key>`)
  *      and feed the payload bytes into term.write so the characters
  *      appear in the rendered terminal buffer.
+ *   5. Declare itself first: a `caps|` packet naming a renderer that draws
+ *      box and block glyphs itself (WebGL or canvas) and the Unicode 11
+ *      width table, which the hosted app decodes ahead of any input.
  *
  * Real-stack: real Chromium, real WebSocket, real bridge process,
  * real subprocess fixture. No mocks anywhere.
@@ -274,26 +277,33 @@ test.describe('isonim-tui-serve: browser e2e', () => {
     // payload from the fixture's D-packet response. The page's
     // term.write feeds the raw payload bytes (including the `echo:`
     // prefix and `paste|` envelope) into the terminal as text.
+    // The page draws with the WebGL (or canvas) renderer, so the screen's
+    // text is read from xterm.js's buffer (`window.__ttyTerm`), not the DOM.
     await expect
-      .poll(
-        async () => {
-          return await page.evaluate(() => {
-            // xterm doesn't expose the Terminal instance globally,
-            // but each row is reachable via the DOM under
-            // .xterm-rows > div. Render text via DOM scan.
-            const rows = document.querySelectorAll('.xterm-rows > div');
-            let s = '';
-            rows.forEach((r) => { s += (r as HTMLElement).innerText + '\n'; });
-            return s;
-          });
-        },
-        {
-          timeout: 15_000,
-          message:
-            'expected echoed `paste|y` payload to appear in the rendered terminal',
-        }
-      )
+      .poll(async () => await readTerminalText(page), {
+        timeout: 15_000,
+        message:
+          'expected echoed `paste|y` payload to appear in the rendered terminal',
+      })
       .toContain('paste|y');
+
+    // The page's FIRST packet declared the client (`caps|…`, §3.5 of
+    // CodeTracer-TUI-Terminal-Adaptation.md): the fixture decoded it with the
+    // library's own `decodeCapsMeta` and answered `caps:<renderer>,<unicode>,
+    // <customGlyphs>` ahead of the echo. A renderer that draws its own box
+    // and block glyphs, and the Unicode 11 width table.
+    const text = await readTerminalText(page);
+    const m = /caps:(webgl|canvas|dom),(6|11),(true|false)/.exec(text);
+    expect(m, `no caps answer in the terminal:\n${text}`).not.toBeNull();
+    expect(text.indexOf('caps:')).toBeLessThan(text.indexOf('paste|y'));
+    expect(m![2]).toBe('11');
+    const declared = JSON.parse(
+      (await page.evaluate(() => (window as any).__ttyCaps as string)).slice(5)
+    );
+    expect(declared.xtermJs).toBe('5.3.0');
+    expect(declared.customGlyphs).toBe(declared.renderer !== 'dom');
+    expect(m![1]).toBe(declared.renderer);
+    expect(['webgl', 'canvas']).toContain(declared.renderer);
 
     if (consoleMsgs.length > 0) {
       console.log('browser console output:\n' + consoleMsgs.join('\n'));

@@ -122,14 +122,26 @@ proc setNonBlocking(fd: cint) =
   if flags == -1: return
   discard fcntl(fd, F_SETFL, flags or O_NONBLOCK)
 
-proc forwardChildStdoutToWs(child: Process; client: AsyncSocket) {.async.} =
+type
+  BridgeStop = ref object
+    ## Set by `bridgeOnce` when its connection is over, BEFORE the child's
+    ## descriptors are closed. The two readers below poll a raw descriptor
+    ## between `sleepAsync`s, and a descriptor number is reused by the next
+    ## connection as soon as it is closed: a reader that woke after the close
+    ## and read "its" number would take the NEXT connection's bytes — measured:
+    ## a second connection lost its app's first packet, the reply to the
+    ## client's first packet (its `caps|` declaration).
+    stopped: bool
+
+proc forwardChildStdoutToWs(child: Process; client: AsyncSocket;
+                            stop: BridgeStop) {.async.} =
   ## Read framed packets from the child's stdout (non-blocking) and
   ## forward them as WebSocket binary messages.
   var parser = initPacketParser()
   let fd = cint(child.outputHandle)
   setNonBlocking(fd)
   var rawBuf: array[4096, byte]
-  while true:
+  while not stop.stopped:
     let n = posix.read(fd, addr rawBuf[0], rawBuf.len)
     if n > 0:
       var s = newString(int(n))
@@ -193,7 +205,7 @@ proc forwardWsToChildStdin(client: AsyncSocket; child: Process) {.async.} =
             return
           off += int(w)
 
-proc drainChildStderr(child: Process) {.async.} =
+proc drainChildStderr(child: Process; stop: BridgeStop) {.async.} =
   ## Copy the child's stderr to ours, forever.
   ##
   ## NOT LOGGING FOR ITS OWN SAKE — this prevents a HANG. `startProcess`
@@ -224,7 +236,7 @@ proc drainChildStderr(child: Process) {.async.} =
     return
   setNonBlocking(fd)
   var rawBuf: array[4096, byte]
-  while true:
+  while not stop.stopped:
     let n = posix.read(fd, addr rawBuf[0], rawBuf.len)
     if n > 0:
       var s = newString(int(n))
@@ -244,14 +256,15 @@ proc drainChildStderr(child: Process) {.async.} =
 
 proc bridgeOnce(client: AsyncSocket; child: Process) {.async.} =
   ## Run the two halves concurrently until either side hangs up.
-  let outFut = forwardChildStdoutToWs(child, client)
+  let stop = BridgeStop()
+  let outFut = forwardChildStdoutToWs(child, client, stop)
   let inFut = forwardWsToChildStdin(client, child)
-  # Fire and forget: the drain ends on its own when the child's stderr reaches
-  # EOF, and it must not be one of the futures the bridge waits on — a hosted
-  # app that never writes to stderr would otherwise keep the connection open
-  # after both real halves had finished.
-  asyncCheck drainChildStderr(child)
+  # Not awaited by the bridge: a hosted app that never writes to stderr would
+  # otherwise keep the connection open after both real halves had finished.
+  # It ends at EOF, or at `stop` (below), before the descriptor is closed.
+  let errFut = drainChildStderr(child, stop)
   await outFut or inFut
+  stop.stopped = true
   try: client.close() except CatchableError: discard
   try: child.terminate() except CatchableError: discard
   # AND REAPED. `terminate` only sends the signal; without a `waitForExit` the
@@ -267,6 +280,12 @@ proc bridgeOnce(client: AsyncSocket; child: Process) {.async.} =
       discard child.waitForExit(ChildReapTimeoutMs)
   except CatchableError:
     discard
+  # Both readers see `stop` at their next wake (each sleeps at most 20 ms)
+  # and return without reading again; only then are the descriptors closed.
+  if not outFut.finished:
+    try: await outFut except CatchableError: discard
+  if not errFut.finished:
+    try: await errFut except CatchableError: discard
   try: child.close() except CatchableError: discard
 
 # ---------------------------------------------------------------------------

@@ -259,3 +259,96 @@ proc manifestKey*(m: TuiElementTreeManifest): string =
     result.add ','
     result.add $e.bounds.h
     result.add ';'
+
+# ---------------------------------------------------------------------------
+# The client's declared capabilities: the `caps|` M packet.
+#
+# A terminal answers a program's start-up queries itself; xterm.js behind this
+# bridge cannot, because a reply would have to be produced by the browser and
+# sent back as input (the bridge carries input as structured `P` packets, not
+# as a byte stream). So the party that knows the client exactly DECLARES it
+# instead: the page sends one `M` packet
+#
+#     caps|{"xtermJs":"5.3.0","renderer":"webgl","customGlyphs":true,
+#           "unicodeVersion":"11","truecolor":true,"sgrMouse":true}
+#
+# as its FIRST packet, before `resize|…`, and a hosted app reads it as the
+# answers to the questions it would otherwise have asked (CodeTracer-TUI-
+# Terminal-Adaptation.md §3.5) and asks nothing. Fields:
+#
+#   * `xtermJs`        — the xterm.js version the page loaded;
+#   * `renderer`       — `webgl`, `canvas` or `dom`: the renderer that loaded;
+#   * `customGlyphs`   — whether xterm.js draws box-drawing and block
+#                        elements itself (the WebGL and canvas renderers with
+#                        `customGlyphs: true`); the DOM renderer draws them
+#                        from the font;
+#   * `unicodeVersion` — the width table: `6` (xterm.js's default) or `11`
+#                        (the Unicode 11 addon active);
+#   * `truecolor`      — 24-bit SGR colours are drawn as given;
+#   * `sgrMouse`       — SGR (1006) mouse reports are produced.
+#
+# The serializer's field order is fixed (the order above), like
+# `encodeElementTreeBody`'s, so the bytes are reproducible.
+# ---------------------------------------------------------------------------
+
+const
+  CapsMetaPrefix* = "caps|"
+    ## The `M` packet payload prefix of a capability declaration.
+
+type
+  ClientCaps* = object
+    xtermJs*: string
+    renderer*: string
+    customGlyphs*: bool
+    unicodeVersion*: string
+    truecolor*: bool
+    sgrMouse*: bool
+
+proc encodeCapsMeta*(c: ClientCaps): string =
+  ## The `M` packet payload declaring `c`: `caps|` and the JSON body.
+  result = CapsMetaPrefix & "{\"xtermJs\":" & jsonEscapeStr(c.xtermJs) &
+    ",\"renderer\":" & jsonEscapeStr(c.renderer) &
+    ",\"customGlyphs\":" & $c.customGlyphs &
+    ",\"unicodeVersion\":" & jsonEscapeStr(c.unicodeVersion) &
+    ",\"truecolor\":" & $c.truecolor &
+    ",\"sgrMouse\":" & $c.sgrMouse & "}"
+
+proc isCapsMeta*(payload: string): bool =
+  ## Whether an `M` packet payload is a capability declaration.
+  payload.startsWith(CapsMetaPrefix)
+
+proc decodeCapsMeta*(payload: string): ClientCaps =
+  ## The declaration in an `M` packet payload. Raises
+  ## `TuiPacketProtocolError` on a payload that is not one, on JSON that does
+  ## not parse, on a missing or mistyped field, and on a `renderer` or
+  ## `unicodeVersion` outside the values above.
+  if not payload.isCapsMeta:
+    raise newException(TuiPacketProtocolError,
+      "not a caps declaration: missing the \"caps|\" prefix")
+  var node: JsonNode
+  try:
+    node = parseJson(payload[CapsMetaPrefix.len .. ^1])
+  except JsonParsingError, ValueError:
+    raise newException(TuiPacketProtocolError, "caps body is not valid JSON")
+  if node.kind != JObject:
+    raise newException(TuiPacketProtocolError, "caps body is not a JSON object")
+  template str(name: string): string =
+    if not node.hasKey(name) or node[name].kind != JString:
+      raise newException(TuiPacketProtocolError,
+        "caps body missing string field: " & name)
+    node[name].getStr
+  template flag(name: string): bool =
+    if not node.hasKey(name) or node[name].kind != JBool:
+      raise newException(TuiPacketProtocolError,
+        "caps body missing boolean field: " & name)
+    node[name].getBool
+  result = ClientCaps(xtermJs: str("xtermJs"), renderer: str("renderer"),
+                      customGlyphs: flag("customGlyphs"),
+                      unicodeVersion: str("unicodeVersion"),
+                      truecolor: flag("truecolor"), sgrMouse: flag("sgrMouse"))
+  if result.renderer notin ["webgl", "canvas", "dom"]:
+    raise newException(TuiPacketProtocolError,
+      "caps renderer must be webgl, canvas or dom: " & result.renderer)
+  if result.unicodeVersion notin ["6", "11"]:
+    raise newException(TuiPacketProtocolError,
+      "caps unicodeVersion must be 6 or 11: " & result.unicodeVersion)
