@@ -95,11 +95,21 @@ lint-nix:
     nixfmt --check flake.nix
 
 lint-markdown:
-    @if command -v markdownlint-cli2 >/dev/null 2>&1; then \
-      markdownlint-cli2 "**/*.md" "#**/node_modules/**" "#test-logs/**" "#tests/e2e/playwright-report/**" || true; \
-    else \
-      echo "markdownlint-cli2 not available; skipping"; \
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v markdownlint-cli2 >/dev/null
+    inventory=$(mktemp)
+    trap 'rm -f "$inventory"' EXIT
+    git ls-files -z -- '*.md' > "$inventory"
+    documents=()
+    while IFS= read -r -d '' document; do
+      documents+=("$document")
+    done < "$inventory"
+    if (( ${#documents[@]} == 0 )); then
+      echo "No tracked Markdown documents" >&2
+      exit 1
     fi
+    markdownlint-cli2 "${documents[@]}"
 
 format: format-nim format-nix
 
@@ -124,3 +134,8 @@ bench-quick:
 
 clean:
     rm -rf test-logs nim-cache
+
+# Entering the dev shell from another git repository must write nothing there.
+# Runs `nix develop`, so it is not part of the in-shell test recipes.
+test-dev-shell:
+    bash tests/test_dev_shell_writes_nothing_elsewhere.sh
