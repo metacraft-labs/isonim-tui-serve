@@ -65,10 +65,12 @@
 ## + runs identically.
 ##
 ## **Per-test platform gating.** Enumerating EVERY ``tests/*.nim`` and
-## re-deriving each file's guards from its imports (the ``Justfile``
-## ``tests`` list now names the same six suites; it used to omit the two
-## RS-M13 round-trip suites, which are real ``suite`` tests and were
-## already included here):
+## re-deriving each file's guards from its imports. ``serveTestSpecs``
+## must name exactly the suites in the ``Justfile`` ``tests`` list: a suite
+## missing here is one ``repro test`` never runs. (That list once omitted
+## the two RS-M13 round-trip suites, which were included here; this list
+## in turn omitted ``test_nimcache_is_worktree_local`` from the day it was
+## added to the ``Justfile``.)
 ##
 ##   * ``test_serve_packet_framing`` / ``test_serve_wsframe_round_trip`` /
 ##     ``test_serve_element_tree_roundtrip`` / ``test_serve_select_story_roundtrip``
@@ -94,6 +96,13 @@
 ##     everywhere and runs for real on POSIX, and it shares the bridge
 ##     test's capacity-1 pool because it too forks children and binds
 ##     sockets.
+##   * ``test_nimcache_is_worktree_local`` — the worktree-local nimcache
+##     contract of the repo-root ``config.nims``. It probes the real
+##     compiler with ``nim dump`` (config evaluation only: no compile, no
+##     socket, no child that outlives it) and checks that the binary was
+##     itself compiled with a checkout-local nimcache, which the
+##     ``buildNimUnittest`` edge satisfies by placing it under ``build/``.
+##     No OS gate; unpooled.
 ##   * ``echo_packet_app.nim`` — a runnable FIXTURE (``import isonim_tui_serve``,
 ##     a ``proc main()`` stdin/stdout echo child), NOT a ``suite`` test. It
 ##     is compiled on demand by ``test_serve_packet_bridge`` at run time
@@ -107,7 +116,7 @@
 ##
 ## No test file in this repo is host-EXCLUSIVE to a non-Linux OS: every one
 ## either has no OS gate or an in-``test`` ``when defined(windows): skip()
-## else: <real body>``, so all six suites are in the Linux graph and there
+## else: <real body>``, so all seven suites are in the Linux graph and there
 ## are no ``when defined(...)`` extraction gates needed on this host.
 ##
 ## **Subprocess serialization.** ``test_serve_packet_bridge`` forks a real
@@ -176,6 +185,12 @@ const serveTestSpecs: seq[ServeTestSpec] = @[
   # socket, so it shares the bridge test's capacity-1 pool.
   ServeTestSpec(source: "tests/test_serve_bridge_child_io.nim",
     binary: "build/test-bin/test_serve_bridge_child_io", pool: bridgePool),
+  # The worktree-local nimcache contract (``config.nims``): probes the real
+  # compiler with ``nim dump`` (config evaluation only, no compile, no
+  # socket), and checks that this binary was itself compiled with a
+  # checkout-local nimcache. No OS gate. Run in parallel.
+  ServeTestSpec(source: "tests/test_nimcache_is_worktree_local.nim",
+    binary: "build/test-bin/test_nimcache_is_worktree_local", pool: ""),
 ]
 
 package isonim_tui_serve:
